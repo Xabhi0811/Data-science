@@ -6,8 +6,11 @@ const API_BASE = 'http://localhost:5000';
 
 function App() {
     const [email, setEmail] = useState('');
+    const [message, setMessage] = useState('');
     const [result, setResult] = useState(null);
+    const [smsResult, setSmsResult] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [smsLoading, setSmsLoading] = useState(false);
     const [history, setHistory] = useState([]);
     const [trainingFile, setTrainingFile] = useState(null);
     const [training, setTraining] = useState(false);
@@ -29,6 +32,7 @@ function App() {
         }
     };
 
+    // Email Validation Functions (Keep existing)
     const validateEmail = async () => {
         if (!email) {
             showToast('Please enter an email address', 'warning');
@@ -57,6 +61,29 @@ function App() {
         setLoading(false);
     };
 
+    // New SMS Detection Function
+    const detectSMS = async () => {
+        if (!message) {
+            showToast('Please enter a message', 'warning');
+            return;
+        }
+        
+        setSmsLoading(true);
+        try {
+            const response = await axios.post(`${API_BASE}/api/detect-sms`, { message });
+            
+            if (response.data.error) {
+                showToast(`Detection error: ${response.data.error}`, 'error');
+            } else {
+                setSmsResult(response.data);
+                showToast('Message analyzed successfully!', 'success');
+            }
+        } catch (error) {
+            handleApiError(error, 'SMS detection');
+        }
+        setSmsLoading(false);
+    };
+
     const trainModel = async () => {
         if (!trainingFile) {
             showToast('Please select a CSV file first', 'warning');
@@ -68,14 +95,16 @@ function App() {
         formData.append('file', trainingFile);
         
         try {
-            const response = await axios.post(`${API_BASE}/api/train`, formData, {
+            // Auto-detect which model to train based on active tab
+            const endpoint = activeTab === 'sms' ? '/api/train-sms' : '/api/train';
+            const response = await axios.post(`${API_BASE}${endpoint}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             
             if (response.data.error) {
                 showToast(`Training error: ${response.data.error}`, 'error');
             } else {
-                showToast(`Model trained successfully! Accuracy: ${(response.data.accuracy * 100).toFixed(2)}%`, 'success');
+                showToast(`${response.data.model_type} trained successfully! Accuracy: ${(response.data.accuracy * 100).toFixed(2)}%`, 'success');
                 setServerStatus('connected');
             }
         } catch (error) {
@@ -120,12 +149,20 @@ function App() {
     };
 
     const clearResults = () => {
-        setResult(null);
-        setEmail('');
+        if (activeTab === 'validate') {
+            setResult(null);
+            setEmail('');
+        } else if (activeTab === 'sms') {
+            setSmsResult(null);
+            setMessage('');
+        }
     };
 
     const downloadSampleCSV = () => {
-        const sampleData = `email,is_real
+        let sampleData = '';
+        
+        if (activeTab === 'validate') {
+            sampleData = `email,is_real
 john.doe@gmail.com,1
 alice.smith@yahoo.com,1
 bob.johnson@hotmail.com,1
@@ -138,12 +175,20 @@ temp@throwawaymail.com,0
 test@guerrillamail.com,0
 user@10minutemail.com,0
 spammer@temp-mail.org,0`;
-
+        } else if (activeTab === 'sms') {
+            sampleData = `Category,Message
+ham,"Go until jurong point, crazy.. Available only in bugis n great world la e buffet... Cine there got amore wat..."
+ham,"Ok lar... Joking wif u oni..."
+spam,"Free entry in 2 a wkly comp to win FA Cup final tkts 21st May 2005. Text FA to 87121 to receive entry question(std txt rate)T&C's apply 08452810075over18's"
+ham,"U dun say so early hor... U c already then say..."
+ham,"Nah I don't think he goes to usf, he lives around here though"`;
+        }
+        
         const blob = new Blob([sampleData], { type: 'text/csv' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'sample_email_data.csv';
+        a.download = activeTab === 'validate' ? 'sample_email_data.csv' : 'sample_sms_data.csv';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -152,7 +197,6 @@ spammer@temp-mail.org,0`;
     };
 
     const showToast = (message, type = 'info') => {
-        // Remove existing toasts
         const existingToasts = document.querySelectorAll('.toast');
         existingToasts.forEach(toast => toast.remove());
 
@@ -167,10 +211,8 @@ spammer@temp-mail.org,0`;
         
         document.body.appendChild(toast);
         
-        // Animate in
         setTimeout(() => toast.classList.add('show'), 100);
         
-        // Remove after 4 seconds
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);
@@ -223,10 +265,10 @@ spammer@temp-mail.org,0`;
                 <div className="header-content">
                     <div className="logo-section">
                         <div className="logo">
-                            <div className="logo-icon">📧</div>
+                            <div className="logo-icon">🤖</div>
                             <div className="logo-text">
-                                <h1>EmailValidator Pro</h1>
-                                <span className="tagline">AI-Powered Email Verification</span>
+                                <h1>Dual AI Validator</h1>
+                                <span className="tagline">Email & SMS Spam Detection</span>
                             </div>
                         </div>
                         <div className={`server-status ${serverStatus}`}>
@@ -248,7 +290,8 @@ spammer@temp-mail.org,0`;
                     <nav className="tabs-nav">
                         <div className="tabs">
                             {[
-                                { id: 'validate', icon: '🔍', label: 'Validate Email' },
+                                { id: 'validate', icon: '📧', label: 'Email Validator' },
+                                { id: 'sms', icon: '💬', label: 'SMS Spam Detector' },
                                 { id: 'train', icon: '🏋️', label: 'Train Model' },
                                 { id: 'history', icon: '📊', label: 'History' }
                             ].map(tab => (
@@ -266,7 +309,7 @@ spammer@temp-mail.org,0`;
 
                     {/* Content Sections */}
                     <div className="content">
-                        {/* Validation Section */}
+                        {/* Email Validation Section */}
                         {activeTab === 'validate' && (
                             <div className="section">
                                 <div className="section-header">
@@ -370,12 +413,115 @@ spammer@temp-mail.org,0`;
                             </div>
                         )}
 
+                        {/* SMS Detection Section */}
+                        {activeTab === 'sms' && (
+                            <div className="section">
+                                <div className="section-header">
+                                    <h2>SMS Spam Detection</h2>
+                                    <p>Detect spam messages using AI</p>
+                                </div>
+                                
+                                <div className="validation-card">
+                                    <div className="input-group">
+                                        <div className="input-wrapper">
+                                            <span className="input-icon">💬</span>
+                                            <textarea
+                                                placeholder="Enter SMS message to analyze..."
+                                                value={message}
+                                                onChange={(e) => setMessage(e.target.value)}
+                                                className="sms-input"
+                                                rows="4"
+                                            />
+                                        </div>
+                                        <div className="action-buttons">
+                                            <button 
+                                                onClick={detectSMS} 
+                                                disabled={smsLoading || serverStatus !== 'connected'}
+                                                className="btn btn-primary validate-btn"
+                                            >
+                                                {smsLoading ? (
+                                                    <>
+                                                        <div className="spinner"></div>
+                                                        Analyzing...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="btn-icon">🔍</span>
+                                                        Detect Spam
+                                                    </>
+                                                )}
+                                            </button>
+                                            <button 
+                                                onClick={clearResults}
+                                                className="btn btn-secondary"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {smsResult && (
+                                        <div className="result-section">
+                                            <div className={`result-card ${smsResult.is_spam ? 'invalid' : 'valid'}`}>
+                                                <div className="result-header">
+                                                    <div className="result-badge">
+                                                        <span className="badge-icon">
+                                                            {smsResult.is_spam ? '🚫' : '✅'}
+                                                        </span>
+                                                        <span className="badge-text">
+                                                            {smsResult.is_spam ? 'Spam Message' : 'Legitimate Message'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="confidence-score">
+                                                        Confidence: {(smsResult.confidence * 100).toFixed(1)}%
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="message-display">
+                                                    <code>{smsResult.message}</code>
+                                                </div>
+
+                                                <div className="probability-metrics">
+                                                    <div className="metric">
+                                                        <label>Ham Probability</label>
+                                                        <div className="metric-bar">
+                                                            <div 
+                                                                className="metric-fill real"
+                                                                style={{width: `${smsResult.probability_ham * 100}%`}}
+                                                            >
+                                                                <span className="metric-value">
+                                                                    {(smsResult.probability_ham * 100).toFixed(1)}%
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="metric">
+                                                        <label>Spam Probability</label>
+                                                        <div className="metric-bar">
+                                                            <div 
+                                                                className="metric-fill fake"
+                                                                style={{width: `${smsResult.probability_spam * 100}%`}}
+                                                            >
+                                                                <span className="metric-value">
+                                                                    {(smsResult.probability_spam * 100).toFixed(1)}%
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         {/* Training Section */}
                         {activeTab === 'train' && (
                             <div className="section">
                                 <div className="section-header">
                                     <h2>Model Training</h2>
-                                    <p>Train the AI model with your email dataset</p>
+                                    <p>Train the AI model with your dataset</p>
                                 </div>
                                 
                                 <div className="training-card">
@@ -455,19 +601,34 @@ spammer@temp-mail.org,0`;
 
                                     <div className="format-guide">
                                         <h4>CSV Format Requirements</h4>
-                                        <div className="code-example">
-                                            <pre>{`email,is_real\njohn.doe@domain.com,1\nfake.email@spam.com,0\n...`}</pre>
-                                        </div>
-                                        <div className="format-notes">
-                                            <div className="note">
-                                                <span className="note-badge real">1</span>
-                                                <span>Real email address</span>
-                                            </div>
-                                            <div className="note">
-                                                <span className="note-badge fake">0</span>
-                                                <span>Fake/Suspicious email</span>
-                                            </div>
-                                        </div>
+                                        {activeTab === 'train' && (
+                                            <>
+                                                <div className="format-options">
+                                                    <div className="format-option">
+                                                        <h5>For Email Validation:</h5>
+                                                        <div className="code-example">
+                                                            <pre>{`email,is_real\njohn.doe@domain.com,1\nfake.email@spam.com,0\n...`}</pre>
+                                                        </div>
+                                                    </div>
+                                                    <div className="format-option">
+                                                        <h5>For SMS Spam Detection:</h5>
+                                                        <div className="code-example">
+                                                            <pre>{`Category,Message\nham,"Hello, how are you?"\nspam,"Free prize! Click here!"\n...`}</pre>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="format-notes">
+                                                    <div className="note">
+                                                        <span className="note-badge real">1/ham</span>
+                                                        <span>Real email or Legitimate message</span>
+                                                    </div>
+                                                    <div className="note">
+                                                        <span className="note-badge fake">0/spam</span>
+                                                        <span>Fake email or Spam message</span>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -571,7 +732,7 @@ spammer@temp-mail.org,0`;
             <footer className="footer">
                 <div className="container">
                     <div className="footer-content">
-                        <p>&copy; 2024 EmailValidator Pro. AI-powered email verification system.</p>
+                        <p>&copy; 2024 Dual AI Validator. Email & SMS spam detection system.</p>
                         <div className="footer-status">
                             <span>Backend: </span>
                             <span className={`status ${serverStatus}`}>

@@ -3,6 +3,7 @@ from flask_cors import CORS
 import pandas as pd
 import joblib
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
 import numpy as np
 import os
 import re
@@ -58,6 +59,82 @@ class AdvancedEmailValidator:
             features.extend([0, 0, 0, 0, 0, 0])
             
         return features
+
+    def rule_based_email_check(self, email):
+        """Rule-based email validation when model is not trained"""
+        email = str(email).lower().strip()
+        
+        # Check for valid email format
+        if '@' not in email or '.' not in email:
+            return {
+                'email': email,
+                'is_real': False,
+                'confidence': 0.8,
+                'probability_real': 0.2,
+                'probability_fake': 0.8,
+                'model_used': 'rule_based',
+                'note': 'Invalid email format'
+            }
+        
+        # Suspicious domains
+        suspicious_domains = [
+            'spam.com', 'fake-mail.xyz', 'throwawaymail.com', 'guerrillamail.com',
+            '10minutemail.com', 'temp-mail.org', 'disposable.com', 'trashmail.com',
+            'fakeinbox.com', 'mailinator.com', 'yopmail.com', 'sharkmail.com'
+        ]
+        
+        # Real domains
+        real_domains = [
+            'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+            'protonmail.com', 'aol.com', 'zoho.com', 'mail.com'
+        ]
+        
+        domain = email.split('@')[1]
+        
+        # Check domain reputation
+        if any(susp_domain in domain for susp_domain in suspicious_domains):
+            return {
+                'email': email,
+                'is_real': False,
+                'confidence': 0.85,
+                'probability_real': 0.15,
+                'probability_fake': 0.85,
+                'model_used': 'rule_based',
+                'note': 'Suspicious domain detected'
+            }
+        elif any(real_domain in domain for real_domain in real_domains):
+            return {
+                'email': email,
+                'is_real': True,
+                'confidence': 0.75,
+                'probability_real': 0.75,
+                'probability_fake': 0.25,
+                'model_used': 'rule_based',
+                'note': 'Trusted domain detected'
+            }
+        else:
+            # For unknown domains, use length and pattern analysis
+            local_part = email.split('@')[0]
+            if len(local_part) < 3 or re.search(r'[0-9]{5,}', local_part) or re.search(r'[._-]{2,}', local_part):
+                return {
+                    'email': email,
+                    'is_real': False,
+                    'confidence': 0.7,
+                    'probability_real': 0.3,
+                    'probability_fake': 0.7,
+                    'model_used': 'rule_based',
+                    'note': 'Suspicious email pattern'
+                }
+            else:
+                return {
+                    'email': email,
+                    'is_real': True,
+                    'confidence': 0.6,
+                    'probability_real': 0.6,
+                    'probability_fake': 0.4,
+                    'model_used': 'rule_based',
+                    'note': 'Appears legitimate'
+                }
 
     def detect_dataset_format(self, df):
         """Detect the format of the uploaded dataset"""
@@ -201,10 +278,11 @@ class AdvancedEmailValidator:
             if not self.is_trained and os.path.exists('email_model.pkl'):
                 self.model = joblib.load('email_model.pkl')
                 self.is_trained = True
-                print("✅ Model loaded from file")
+                print("✅ Email Model loaded from file")
             
             if not self.is_trained:
-                return {"error": "Model not trained. Please train first."}
+                print("🔄 Using rule-based email validation (model not trained)")
+                return self.rule_based_email_check(email)
             
             # Clean and validate email
             email = str(email).strip().lower()
@@ -221,7 +299,8 @@ class AdvancedEmailValidator:
                 'confidence': float(max(probabilities)),
                 'probability_real': float(probabilities[1]),
                 'probability_fake': float(probabilities[0]),
-                'features_used': len(features)
+                'features_used': len(features),
+                'model_used': 'machine_learning'
             }
             
             status = "Real" if result['is_real'] else "Fake"
@@ -229,19 +308,153 @@ class AdvancedEmailValidator:
             return result
             
         except Exception as e:
-            return {"error": f"Prediction error: {str(e)}"}
+            print(f"❌ Email prediction error, using rule-based: {str(e)}")
+            return self.rule_based_email_check(email)
 
-# Create validator instance
-validator = AdvancedEmailValidator()
+class SMSDetector:
+    def __init__(self):
+        self.model = None
+        self.vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+        self.is_trained = False
+
+    def preprocess_text(self, text):
+        """Preprocess SMS text"""
+        text = str(text).lower()
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        return text
+
+    def rule_based_sms_detection(self, message):
+        """Basic rule-based spam detection when model not trained"""
+        spam_keywords = [
+            'free', 'winner', 'won', 'prize', 'cash', 'loan', 'credit', 
+            'urgent', 'alert', 'security', 'verify', 'click', 'call now',
+            'limited time', 'offer', 'discount', 'winner', 'congratulations',
+            'selected', 'exclusive', 'deal', 'money', 'profit', 'investment',
+            'bitcoin', 'crypto', 'lottery', 'gift card', 'claim', 'bonus',
+            'text stop', 'reply stop', 'msg', 'txt', 'rate', 'charge',
+            'guaranteed', 'risk-free', 'million', 'thousand', 'dollar',
+            'pounds', 'euros', 'income', 'earn', 'make money', 'work from home'
+        ]
+        
+        message_lower = message.lower()
+        spam_score = 0
+        
+        for keyword in spam_keywords:
+            if keyword in message_lower:
+                spam_score += 1
+        
+        # Calculate spam probability
+        max_possible_score = min(len(spam_keywords), 10)  # Cap at 10 for normalization
+        spam_probability = min(spam_score / 5, 0.95)  # Normalize and cap at 0.95
+        
+        # Adjust based on message length
+        if len(message) < 20:
+            spam_probability *= 0.8  # Short messages are less likely to be spam
+        
+        # Common ham indicators
+        ham_indicators = ['hello', 'hi ', 'thanks', 'thank you', 'please', 'meeting', 'lunch', 'dinner', 'see you', 'tomorrow', 'today']
+        ham_score = sum(1 for indicator in ham_indicators if indicator in message_lower)
+        spam_probability = max(0.1, spam_probability - (ham_score * 0.1))
+        
+        is_spam = spam_probability > 0.5
+        confidence = abs(spam_probability - 0.5) * 2  # Convert to confidence score
+        
+        return {
+            'message': message,
+            'is_spam': is_spam,
+            'category': 'spam' if is_spam else 'ham',
+            'confidence': max(confidence, 0.3),  # Minimum 30% confidence
+            'probability_spam': spam_probability,
+            'probability_ham': 1 - spam_probability,
+            'model_used': 'rule_based',
+            'note': 'Train the model for better accuracy',
+            'spam_keywords_found': spam_score
+        }
+
+    def train_sms_model(self, csv_file):
+        """Train SMS spam detection model"""
+        try:
+            df = pd.read_csv(csv_file)
+            print(f"📊 Loaded {len(df)} SMS messages for spam detection")
+            
+            # Check dataset format
+            if 'Category' not in df.columns or 'Message' not in df.columns:
+                return {"error": "SMS dataset must contain 'Category' and 'Message' columns"}
+            
+            # Prepare data
+            df['processed_text'] = df['Message'].apply(self.preprocess_text)
+            X = self.vectorizer.fit_transform(df['processed_text'])
+            y = df['Category'].map({'ham': 0, 'spam': 1})
+            
+            # Train model
+            self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+            self.model.fit(X, y)
+            
+            accuracy = self.model.score(X, y)
+            self.is_trained = True
+            
+            # Save model
+            joblib.dump({'model': self.model, 'vectorizer': self.vectorizer}, 'sms_model.pkl')
+            
+            print(f"✅ SMS Spam Model trained! Accuracy: {accuracy:.4f}")
+            return accuracy
+            
+        except Exception as e:
+            print(f"❌ SMS Training error: {str(e)}")
+            raise e
+
+    def detect_sms(self, message):
+        """Detect if SMS message is spam or ham"""
+        try:
+            # Try to load pre-trained model
+            if not self.is_trained and os.path.exists('sms_model.pkl'):
+                saved_data = joblib.load('sms_model.pkl')
+                self.model = saved_data['model']
+                self.vectorizer = saved_data['vectorizer']
+                self.is_trained = True
+                print("✅ SMS Model loaded from file")
+            
+            if not self.is_trained:
+                print("🔄 Using rule-based SMS detection (model not trained)")
+                return self.rule_based_sms_detection(message)
+            
+            # Preprocess and predict
+            processed_text = self.preprocess_text(message)
+            X = self.vectorizer.transform([processed_text])
+            prediction = self.model.predict(X)[0]
+            probabilities = self.model.predict_proba(X)[0]
+            
+            result = {
+                'message': message,
+                'is_spam': bool(prediction),
+                'category': 'spam' if prediction else 'ham',
+                'confidence': float(max(probabilities)),
+                'probability_spam': float(probabilities[1]),
+                'probability_ham': float(probabilities[0]),
+                'model_used': 'machine_learning'
+            }
+            
+            print(f"🔍 SMS Prediction: {'SPAM' if result['is_spam'] else 'HAM'} (confidence: {result['confidence']:.3f})")
+            return result
+            
+        except Exception as e:
+            print(f"❌ SMS detection error, using rule-based: {str(e)}")
+            return self.rule_based_sms_detection(message)
+
+# Initialize both validators
+email_validator = AdvancedEmailValidator()
+sms_detector = SMSDetector()
 
 @app.route('/')
 def home():
     return jsonify({
-        "message": "Advanced Email Validator API is running! 🚀",
+        "message": "Dual AI Validator API is running! 🚀",
         "endpoints": {
             "GET /api/health": "Check server status",
-            "POST /api/train": "Train model with CSV (supports multiple formats)",
-            "POST /api/validate": "Validate email"
+            "POST /api/train": "Train email model with CSV",
+            "POST /api/train-sms": "Train SMS spam model",
+            "POST /api/validate": "Validate email address",
+            "POST /api/detect-sms": "Detect SMS spam"
         },
         "supported_formats": [
             "email,is_real",
@@ -254,15 +467,17 @@ def home():
 def health_check():
     return jsonify({
         "status": "healthy",
-        "model_trained": validator.is_trained,
-        "message": "Advanced Email Validator is running! ✅",
-        "supported_dataset_formats": ["email/is_real", "spam/ham SMS"]
+        "email_model_trained": email_validator.is_trained,
+        "sms_model_trained": sms_detector.is_trained,
+        "message": "Dual AI Validator is running! ✅",
+        "supported_features": ["Email Validation", "SMS Spam Detection"],
+        "note": "Using rule-based detection when models not trained"
     })
 
 @app.route('/api/train', methods=['POST'])
 def train_model():
     try:
-        print("📥 Received training request...")
+        print("📥 Received email training request...")
         
         if 'file' not in request.files:
             return jsonify({"error": "No file provided"}), 400
@@ -281,17 +496,54 @@ def train_model():
         print(f"💾 File saved as {filename}")
         
         # Train the model
-        accuracy = validator.train(filename)
+        accuracy = email_validator.train(filename)
         
         return jsonify({
-            "message": "Model trained successfully! 🎉",
+            "message": "Email Model trained successfully! 🎉",
             "accuracy": accuracy,
             "model_trained": True,
+            "model_type": "Email Validator",
             "status": "success"
         })
         
     except Exception as e:
         print(f"❌ Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/train-sms', methods=['POST'])
+def train_sms_model():
+    try:
+        print("📥 Received SMS training request...")
+        
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+        
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        
+        if not file.filename.endswith('.csv'):
+            return jsonify({"error": "Please upload a CSV file"}), 400
+        
+        # Save the file
+        filename = 'uploaded_sms_dataset.csv'
+        file.save(filename)
+        print(f"💾 SMS file saved as {filename}")
+        
+        # Train the SMS model
+        accuracy = sms_detector.train_sms_model(filename)
+        
+        return jsonify({
+            "message": "SMS Spam Model trained successfully! 🎉",
+            "accuracy": accuracy,
+            "model_trained": True,
+            "model_type": "SMS Spam Detector",
+            "status": "success"
+        })
+        
+    except Exception as e:
+        print(f"❌ SMS Training Error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/validate', methods=['POST'])
@@ -308,7 +560,28 @@ def validate_email():
             return jsonify({"error": "Email is required"}), 400
         
         print(f"🔍 Validating email: {email}")
-        result = validator.predict(email)
+        result = email_validator.predict(email)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/detect-sms', methods=['POST'])
+def detect_sms():
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+        
+        message = data.get('message', '').strip()
+        
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+        
+        print(f"🔍 Analyzing SMS message: {message[:50]}...")
+        result = sms_detector.detect_sms(message)
         
         return jsonify(result)
         
@@ -338,8 +611,9 @@ def dataset_info():
         format_info = {
             'columns': df.columns.tolist(),
             'rows': len(df),
-            'format': validator.detect_dataset_format(df),
-            'sample_data': df.head(3).to_dict('records')
+            'format': email_validator.detect_dataset_format(df),
+            'sample_data': df.head(3).to_dict('records'),
+            'suggested_model': 'email' if 'email' in df.columns else 'sms'
         }
         
         # Clean up
@@ -352,17 +626,18 @@ def dataset_info():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("🚀 Starting Advanced Email Validator Server...")
+    print("🚀 Starting Dual AI Validator Server...")
     print("📍 Server will run on: http://localhost:5000")
     print("📧 Available endpoints:")
-    print("   http://localhost:5000/")
-    print("   http://localhost:5000/api/health")
-    print("   POST http://localhost:5000/api/train")
-    print("   POST http://localhost:5000/api/validate")
-    print("   POST http://localhost:5000/api/dataset-info")
-    print("\n📊 Supported dataset formats:")
-    print("   - email, is_real")
-    print("   - Category, Message (spam/ham SMS)")
+    print("   GET  /api/health")
+    print("   POST /api/train (Email validation)")
+    print("   POST /api/train-sms (SMS spam detection)")
+    print("   POST /api/validate (Check email)")
+    print("   POST /api/detect-sms (Check SMS)")
+    print("\n📊 Supported features:")
+    print("   - Email Address Validation")
+    print("   - SMS Spam Detection")
+    print("   - Rule-based fallback when models not trained")
     print("\n⚡ Starting server...")
     
     app.run(debug=True, host='0.0.0.0', port=5000)
