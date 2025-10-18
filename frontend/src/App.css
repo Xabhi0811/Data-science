@@ -11,6 +11,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    backdrop-filter: blur(10px);
 }
 
 .server-status.connected {
@@ -37,4 +38,40 @@
     cursor: pointer;
     font-size: 0.9rem;
     padding: 2px;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.refresh-btn:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+/* Training Actions */
+.training-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.train-btn {
+    min-width: 200px;
+}
+
+/* Code Block */
+.code-block {
+    background: #1a1a1a;
+    color: #00ff00;
+    padding: 1.5rem;
+    border-radius: 10px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-top: 1rem;
+    overflow-x: auto;
+    border: 1px solid #333;
 }
